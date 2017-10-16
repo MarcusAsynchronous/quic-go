@@ -32,17 +32,20 @@ func mockKeyDerivation(crypto.MintController, protocol.Perspective) (crypto.AEAD
 
 var _ = Describe("TLS Crypto Setup", func() {
 	var (
-		cs          *cryptoSetupTLS
-		aeadChanged chan protocol.EncryptionLevel
+		cs             *cryptoSetupTLS
+		paramsReceived chan *TransportParameters
+		aeadChanged    chan protocol.EncryptionLevel
 
 		mintControllerConstructor = newMintController
 	)
 
 	BeforeEach(func() {
+		paramsReceived = make(chan *TransportParameters)
 		aeadChanged = make(chan protocol.EncryptionLevel, 2)
-		csInt, _, err := NewCryptoSetupTLSServer(
+		csInt, err := NewCryptoSetupTLSServer(
 			testdata.GetTLSConfig(),
 			&TransportParameters{},
+			paramsReceived,
 			aeadChanged,
 			nil,
 			protocol.VersionTLS,

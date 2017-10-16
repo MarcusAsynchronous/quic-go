@@ -19,12 +19,16 @@ func parameterMapToList(paramMap map[transportParameterID][]byte) []transportPar
 }
 
 var _ = Describe("TLS Extension Handler, for the server", func() {
-	var handler *extensionHandlerServer
-	var el mint.ExtensionList
+	var (
+		handler        *extensionHandlerServer
+		el             mint.ExtensionList
+		paramsReceived chan *TransportParameters
+	)
 
 	BeforeEach(func() {
-		pn := &paramsNegotiator{}
-		handler = newExtensionHandlerServer(pn, nil, protocol.VersionWhatever)
+		// use a buffered channel here, so that we don't have to receive concurrently when parsing a message
+		paramsReceived = make(chan *TransportParameters, 1)
+		handler = newExtensionHandlerServer(&TransportParameters{}, paramsReceived, nil, protocol.VersionWhatever)
 		el = make(mint.ExtensionList, 0)
 	})
 
@@ -79,7 +83,9 @@ var _ = Describe("TLS Extension Handler, for the server", func() {
 			addClientHelloWithParameters(parameters)
 			err := handler.Receive(mint.HandshakeTypeClientHello, &el)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(handler.params.GetSendStreamFlowControlWindow()).To(BeEquivalentTo(0x11223344))
+			var params *TransportParameters
+			Expect(paramsReceived).To(Receive(&params))
+			Expect(params.StreamFlowControlWindow).To(BeEquivalentTo(0x11223344))
 		})
 
 		It("errors if the ClientHello doesn't contain TransportParameters", func() {

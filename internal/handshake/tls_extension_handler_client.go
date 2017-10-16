@@ -3,16 +3,19 @@ package handshake
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/lucas-clemente/quic-go/qerr"
 
 	"github.com/bifurcation/mint"
 	"github.com/bifurcation/mint/syntax"
 	"github.com/lucas-clemente/quic-go/internal/protocol"
+	"github.com/lucas-clemente/quic-go/internal/utils"
 )
 
 type extensionHandlerClient struct {
-	params *paramsNegotiator
+	params         *TransportParameters
+	paramsReceived chan<- *TransportParameters
 
 	initialVersion    protocol.VersionNumber
 	supportedVersions []protocol.VersionNumber
@@ -21,9 +24,16 @@ type extensionHandlerClient struct {
 
 var _ mint.AppExtensionHandler = &extensionHandlerClient{}
 
-func newExtensionHandlerClient(params *paramsNegotiator, initialVersion protocol.VersionNumber, supportedVersions []protocol.VersionNumber, version protocol.VersionNumber) *extensionHandlerClient {
+func newExtensionHandlerClient(
+	params *TransportParameters,
+	paramsReceived chan<- *TransportParameters,
+	initialVersion protocol.VersionNumber,
+	supportedVersions []protocol.VersionNumber,
+	version protocol.VersionNumber,
+) *extensionHandlerClient {
 	return &extensionHandlerClient{
 		params:            params,
+		paramsReceived:    paramsReceived,
 		initialVersion:    initialVersion,
 		supportedVersions: supportedVersions,
 		version:           version,
@@ -38,7 +48,7 @@ func (h *extensionHandlerClient) Send(hType mint.HandshakeType, el *mint.Extensi
 	data, err := syntax.Marshal(clientHelloTransportParameters{
 		NegotiatedVersion: uint32(h.version),
 		InitialVersion:    uint32(h.initialVersion),
-		Parameters:        h.params.GetTransportParameters(),
+		Parameters:        h.params.getTransportParameters(),
 	})
 	if err != nil {
 		return err
@@ -47,6 +57,7 @@ func (h *extensionHandlerClient) Send(hType mint.HandshakeType, el *mint.Extensi
 }
 
 func (h *extensionHandlerClient) Receive(hType mint.HandshakeType, el *mint.ExtensionList) error {
+	utils.Debugf("Received %#v", hType)
 	ext := &tlsExtensionBody{}
 	found := el.Find(ext)
 
@@ -99,5 +110,12 @@ func (h *extensionHandlerClient) Receive(hType mint.HandshakeType, el *mint.Exte
 		// TODO: return the right error here
 		return errors.New("server didn't sent stateless_reset_token")
 	}
-	return h.params.SetFromTransportParameters(eetp.Parameters)
+	params, err := ReadTransportParamters(eetp.Parameters)
+	if err != nil {
+		return err
+	}
+	// TODO(#878): remove this when implementing the MAX_STREAM_ID frame
+	params.MaxStreams = math.MaxUint32
+	h.paramsReceived <- params
+	return nil
 }

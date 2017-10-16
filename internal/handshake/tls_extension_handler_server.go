@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/lucas-clemente/quic-go/qerr"
 
@@ -13,7 +14,8 @@ import (
 )
 
 type extensionHandlerServer struct {
-	params *paramsNegotiator
+	paramsReceived chan<- *TransportParameters
+	params         *TransportParameters
 
 	version           protocol.VersionNumber
 	supportedVersions []protocol.VersionNumber
@@ -21,9 +23,15 @@ type extensionHandlerServer struct {
 
 var _ mint.AppExtensionHandler = &extensionHandlerServer{}
 
-func newExtensionHandlerServer(params *paramsNegotiator, supportedVersions []protocol.VersionNumber, version protocol.VersionNumber) *extensionHandlerServer {
+func newExtensionHandlerServer(
+	params *TransportParameters,
+	paramsReceived chan<- *TransportParameters,
+	supportedVersions []protocol.VersionNumber,
+	version protocol.VersionNumber,
+) *extensionHandlerServer {
 	return &extensionHandlerServer{
 		params:            params,
+		paramsReceived:    paramsReceived,
 		version:           version,
 		supportedVersions: supportedVersions,
 	}
@@ -35,7 +43,8 @@ func (h *extensionHandlerServer) Send(hType mint.HandshakeType, el *mint.Extensi
 	}
 
 	transportParams := append(
-		h.params.GetTransportParameters(),
+		h.params.getTransportParameters(),
+		// TODO(#855): generate a real token
 		transportParameter{statelessResetTokenParameterID, bytes.Repeat([]byte{42}, 16)},
 	)
 	supportedVersions := make([]uint32, len(h.supportedVersions))
@@ -89,5 +98,12 @@ func (h *extensionHandlerServer) Receive(hType mint.HandshakeType, el *mint.Exte
 			return errors.New("client sent a stateless reset token")
 		}
 	}
-	return h.params.SetFromTransportParameters(chtp.Parameters)
+	params, err := ReadTransportParamters(chtp.Parameters)
+	if err != nil {
+		return err
+	}
+	// TODO(#878): remove this when implementing the MAX_STREAM_ID frame
+	params.MaxStreams = math.MaxUint32
+	h.paramsReceived <- params
+	return nil
 }
